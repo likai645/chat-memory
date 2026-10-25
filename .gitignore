@@ -1,0 +1,24 @@
+# 运行时数据（每个人的聊天记录，绝不进仓库）
+data/
+*.db
+*.db-journal
+asr-last.wav
+
+# 打包产物
+dist/
+build/
+_pkg/
+*.exe
+*.zip
+
+# 缓存与日志
+__pycache__/
+*.pyc
+*.log
+tmp-*/
+
+# 编辑器
+.vscode/
+.idea/
+.DS_Store
+start-test.err

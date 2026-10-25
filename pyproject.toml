@@ -1,0 +1,31 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "chat-memory"
+version = "0.1.0"
+description = "跨上下文长期记忆服务：给 QQ / 微信 / 抖音等聊天机器人用的本地记忆"
+readme = "PUBLISH.md"
+requires-python = ">=3.9"
+license = { text = "MIT" }
+authors = [{ name = "chat-memory contributors" }]
+keywords = ["memory", "chatbot", "long-term-memory", "qq", "wechat"]
+classifiers = [
+    "Programming Language :: Python :: 3",
+    "Operating System :: OS Independent",
+    "Topic :: Communications :: Chat",
+]
+dependencies = []
+
+[project.scripts]
+chat-memory = "run_service:cli"
+
+[project.urls]
+Homepage = "https://example.com/chat-memory"
+
+[tool.setuptools]
+py-modules = [
+    "memory_service", "layered", "archive", "catalog", "profile",
+    "when", "client", "selfcheck", "run_service",
+]

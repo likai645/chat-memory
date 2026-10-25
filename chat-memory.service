@@ -1,0 +1,18 @@
+[Unit]
+Description=Chat Memory Service (long-term memory for chat bots)
+After=network.target
+
+[Service]
+Type=simple
+WorkingDirectory=/opt/chat-memory
+ExecStartPre=/usr/bin/python3 /opt/chat-memory/selfcheck.py
+ExecStart=/usr/bin/python3 /opt/chat-memory/memory_service.py serve --port 5299
+Restart=always
+RestartSec=3
+# 需要密码就打开这两行：
+# Environment=DSH_MEM_TOKEN=换成你的token
+# Environment=DSH_MEM_LLM_URL=https://api.deepseek.com/v1/chat/completions
+# Environment=DSH_MEM_LLM_KEY=sk-xxxx
+
+[Install]
+WantedBy=multi-user.target
