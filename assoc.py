@@ -26,6 +26,8 @@ import argparse
 import json
 import re
 import sqlite3
+
+import activation
 import time
 from pathlib import Path
 
@@ -45,18 +47,31 @@ SCHEMA = """
 CREATE TABLE IF NOT EXISTS entities(
   name TEXT PRIMARY KEY, days INTEGER, hits INTEGER, updated TEXT);
 CREATE TABLE IF NOT EXISTS mentions(
-  entity TEXT, day TEXT, count INTEGER, sample TEXT, PRIMARY KEY(entity, day));
+  entity TEXT, day TEXT, count INTEGER, sample TEXT,
+  emotion REAL DEFAULT 0, significance REAL DEFAULT 0, identity REAL DEFAULT 0,
+  recall_count INTEGER DEFAULT 0, last_recalled INTEGER DEFAULT 0,
+  PRIMARY KEY(entity, day));
 CREATE TABLE IF NOT EXISTS links(
   a TEXT, b TEXT, weight INTEGER, PRIMARY KEY(a, b));
 CREATE INDEX IF NOT EXISTS idx_mentions_day ON mentions(day);
 CREATE INDEX IF NOT EXISTS idx_links_a ON links(a);
 """
 
+MENTION_COLUMNS = (("emotion", "REAL DEFAULT 0"), ("significance", "REAL DEFAULT 0"),
+                   ("identity", "REAL DEFAULT 0"), ("recall_count", "INTEGER DEFAULT 0"),
+                   ("last_recalled", "INTEGER DEFAULT 0"))
+
 
 def connect() -> sqlite3.Connection:
     DATA.mkdir(parents=True, exist_ok=True)
     conn = sqlite3.connect(DB, timeout=10)
     conn.executescript(SCHEMA)
+    # 老库补列：升级不炸，数据不丢
+    existing = {row[1] for row in conn.execute("PRAGMA table_info(mentions)").fetchall()}
+    for name, decl in MENTION_COLUMNS:
+        if name not in existing and existing:
+            conn.execute(f"ALTER TABLE mentions ADD COLUMN {name} {decl}")
+    conn.commit()
     return conn
 
 
@@ -100,18 +115,26 @@ def build() -> dict:
             if len(day) != 10:
                 continue
             day_entities: dict[str, list[str]] = {}
+            day_text_parts: list[str] = []
             for line in path.read_text(encoding="utf-8").splitlines():
                 if "用户：" not in line:
                     continue
                 body = line.split("用户：", 1)[1]
+                day_text_parts.append(body)
                 for gram in grams(body):
                     day_entities.setdefault(gram, []).append(body.strip())
+            # 这一天的情绪浓度 / 意义强度 / 身份相关性，供激活值使用
+            scores = activation.profile_scores("".join(day_text_parts))
             for gram, samples in day_entities.items():
                 entity_days.setdefault(gram, set()).add(day)
                 entity_hits[gram] = entity_hits.get(gram, 0) + len(samples)
                 conn.execute(
-                    "INSERT OR REPLACE INTO mentions(entity, day, count, sample) VALUES(?,?,?,?)",
-                    (gram, day, len(samples), samples[0][:120]))
+                    "INSERT INTO mentions(entity, day, count, sample, emotion, significance, identity) "
+                    "VALUES(?,?,?,?,?,?,?) ON CONFLICT(entity, day) DO UPDATE SET "
+                    "count=excluded.count, sample=excluded.sample, emotion=excluded.emotion, "
+                    "significance=excluded.significance, identity=excluded.identity",
+                    (gram, day, len(samples), samples[0][:120],
+                     scores["emotion"], scores["significance"], scores["identity"]))
             # 一天里最多取 8 个实体做共现，避免噪音爆炸
             top = sorted(day_entities, key=lambda g: len(day_entities[g]), reverse=True)[:8]
             per_day[day] = set(top)
@@ -178,20 +201,38 @@ def days_for(names: list[str], limit: int = 8, query: str = "") -> list[dict]:
     conn = connect()
     seen: dict[str, dict] = {}
     for name in names:
-        for day, count, sample in conn.execute(
-                "SELECT day, count, sample FROM mentions WHERE entity=? ORDER BY day DESC LIMIT ?",
+        for day, count, sample, emotion, significance, identity, recalls in conn.execute(
+                "SELECT day, count, sample, emotion, significance, identity, recall_count FROM mentions WHERE entity=? ORDER BY day DESC LIMIT ?",
                 (name, limit)).fetchall():
-            slot = seen.setdefault(day, {"day": day, "score": 0, "hits": [], "sample": sample})
+            slot = seen.setdefault(day, {"day": day, "score": 0, "hits": [], "sample": sample,
+                                     "emotion": emotion, "significance": significance,
+                                     "identity": identity, "recalls": recalls})
             slot["score"] += count
             slot["hits"].append(name)
             # 这段原话里真的出现了问的那个词，优先级要高
             if query and query.strip() and query.strip() in sample:
                 slot["score"] += 5
     conn.close()
-    ordered = sorted(seen.values(), key=lambda item: (-item["score"], item["day"]))
-    for item in ordered:
+    # 不再按“命中次数”排，而是按激活值让记忆竞争：重要的、带情绪的、被反复想起的更容易浮上来
+    candidates = list(seen.values())
+    for item in candidates:
         item["hits"] = sorted(set(item["hits"]))
-    return ordered
+        item["match"] = item.pop("score", 1)
+    return activation.rank(candidates, today=None, config={"top_k": limit})
+
+
+def reinforce(days: list[str]) -> None:
+    """被想起一次，就强化一次：回忆本身就是对记忆的改写。"""
+    if not days:
+        return
+    conn = connect()
+    now = int(time.time())
+    with conn:
+        for day in days:
+            conn.execute(
+                "UPDATE mentions SET recall_count=recall_count+1, last_recalled=? WHERE day=?",
+                (now, day))
+    conn.close()
 
 
 CONFIG_PATH = DATA / "assoc_config.json"
@@ -285,6 +326,9 @@ def ask(query: str, depth: int = 1, limit: int = 5, respect_limits: bool = True)
         return {"ok": True, "level": "none", "answer": "命中了实体，但没有具体日子。",
                 "entities": names, "related": list(related), "days": []}
 
+    # 被想起的日子要留下痕迹：下次更容易浮上来
+    reinforce([item["day"] for item in days])
+
     def tidy(item: dict) -> str:
         """展示时只显示最有用的那个词：优先问句里的词，其次原话里出现的实体。"""
         key = query.strip()
@@ -324,6 +368,7 @@ if __name__ == "__main__":
         links = conn.execute("SELECT COUNT(*) FROM links").fetchone()[0]
         conn.close()
         print(json.dumps({"entities": total, "links": links}, ensure_ascii=False))
+
 
 
 
