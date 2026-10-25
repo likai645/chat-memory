@@ -121,3 +121,32 @@ DSH_MEM_LLM_KEY=sk-...
 ## 许可
 
 MIT
+
+## 用 MCP 接（最省事的“安装”方式）
+
+mcp_server.py 是标准 MCP server（stdio，零依赖）。任何支持 MCP 的客户端加一段配置就能用：
+
+```json
+{
+  "mcpServers": {
+    "chat-memory": {
+      "command": "python",
+      "args": ["D:/chat-memory/mcp_server.py"]
+    }
+  }
+}
+```
+
+然后模型就能直接调用 7 个工具：
+
+| 工具 | 作用 |
+|---|---|
+| memory_recall | 回消息前取记忆 |
+| memory_remember | 存一条消息（msg_id 去重） |
+| memory_batch | 批量导入历史 |
+| memory_facts | 看记住了什么 |
+| memory_forget | 删掉某人的记忆 |
+| memory_ask | 问过去的事（支持“昨天”“上周三”） |
+| memory_hints | 找话题用的小清单 |
+
+自测：python test_mcp.py（模拟客户端发 JSON-RPC，逐个验证工具）。
