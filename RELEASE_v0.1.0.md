@@ -40,7 +40,15 @@ memory = mem.recall("qq", chat=group, user=qq)   # 回消息前拿到记忆
 mem.remember("qq", chat=group, user=qq, role="user", text=msg, msg_id=msg_id)
 ```
 
+### 用 MCP 一行接入（推荐）
+
+```json
+{"mcpServers": {"chat-memory": {"command": "python", "args": ["路径/mcp_server.py"]}}}
+`
+放进任何 MCP 客户端的配置，模型即可调用 7 个记忆工具（recall / remember / batch / facts / forget / ask / hints）。
+
 ### 已知局限
 
 事实抽取是规则版（喜欢/讨厌/住在/叫…），复杂表达会漏；没有语义检索；群聊暂不区分「谁在跟谁说话」。发布时请如实说明，别让人以为它能读懂人心。
+
 
