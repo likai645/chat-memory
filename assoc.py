@@ -194,14 +194,90 @@ def days_for(names: list[str], limit: int = 8, query: str = "") -> list[dict]:
     return ordered
 
 
-def ask(query: str, depth: int = 1, limit: int = 5) -> dict:
+CONFIG_PATH = DATA / "assoc_config.json"
+LOG_SCHEMA = """
+CREATE TABLE IF NOT EXISTS assoc_log(topic TEXT, ts INTEGER);
+CREATE INDEX IF NOT EXISTS idx_assoc_log ON assoc_log(topic, ts);
+"""
+DEFAULT_CONFIG = {
+    "mode": "fallback",          # fallback=只在查不到时联想 / always=每次都试 / off=关掉
+    "cooldown_hours": 12,        # 同一个话题多久内不重复联想
+    "max_per_day": 3,            # 一天最多联想几次
+    "min_days": 1,               # 命中实体至少出现在几天（2 更保守）
+}
+
+
+def load_config() -> dict:
+    if CONFIG_PATH.exists():
+        try:
+            data = json.loads(CONFIG_PATH.read_text(encoding="utf-8"))
+            return {**DEFAULT_CONFIG, **data}
+        except Exception:  # noqa: BLE001 - 配置坏了就用默认
+            pass
+    save_config(DEFAULT_CONFIG)
+    return dict(DEFAULT_CONFIG)
+
+
+def save_config(config: dict) -> None:
+    CONFIG_PATH.parent.mkdir(parents=True, exist_ok=True)
+    CONFIG_PATH.write_text(json.dumps(config, ensure_ascii=False, indent=1), encoding="utf-8")
+
+
+def _log_conn() -> sqlite3.Connection:
+    conn = connect()
+    conn.executescript(LOG_SCHEMA)
+    return conn
+
+
+def allowed(topic: str) -> bool:
+    """冷却 + 频控：决定这次要不要真的联想。"""
+    config = load_config()
+    now = int(time.time())
+    conn = _log_conn()
+    try:
+        last = conn.execute("SELECT MAX(ts) FROM assoc_log WHERE topic=?", (topic,)).fetchone()[0]
+        if last and now - last < int(config["cooldown_hours"]) * 3600:
+            return False
+        today_start = now - now % 86400
+        used = conn.execute("SELECT COUNT(*) FROM assoc_log WHERE ts>=?", (today_start,)).fetchone()[0]
+        if used >= int(config["max_per_day"]):
+            return False
+        return True
+    finally:
+        conn.close()
+
+
+def mark(topic: str) -> None:
+    conn = _log_conn()
+    with conn:
+        conn.execute("INSERT INTO assoc_log(topic, ts) VALUES(?,?)", (topic, int(time.time())))
+    conn.close()
+
+
+def ask(query: str, depth: int = 1, limit: int = 5, respect_limits: bool = True) -> dict:
+    config = load_config()
+    if config.get("mode") == "off":
+        return {"ok": True, "level": "none", "answer": "联想功能已关闭。",
+                "entities": [], "related": [], "days": []}
+
     direct = match_entities(query)
     if not direct:
-        expanded_only = expand([], 0)
         return {"ok": True, "level": "none", "answer": "没有联想到相关内容。",
                 "entities": [], "related": [], "days": []}
 
-    names = [name for name, _days, _hits in direct]
+    names = [name for name, days, _hits in direct if days >= int(config.get("min_days", 1))]
+    if not names:
+        return {"ok": True, "level": "none", "answer": "只提过一次，还不足以算常聊的事。",
+                "entities": [], "related": [], "days": []}
+
+    # 冷却与频控：同一个话题不反复翻，一天也不翻太多次
+    if respect_limits:
+        topic = names[0]
+        if not allowed(topic):
+            return {"ok": True, "level": "skipped", "answer": "这个话题刚联想过了，先不重复。",
+                    "entities": names, "related": [], "days": []}
+        mark(topic)
+
     related = expand(names, depth)
     days = days_for(names + list(related), limit=limit, query=query)
 
@@ -248,6 +324,7 @@ if __name__ == "__main__":
         links = conn.execute("SELECT COUNT(*) FROM links").fetchone()[0]
         conn.close()
         print(json.dumps({"entities": total, "links": links}, ensure_ascii=False))
+
 
 
 
