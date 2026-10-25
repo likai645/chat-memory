@@ -57,6 +57,7 @@ def main() -> int:
 
     import archive
     import assoc
+    import beliefs
     import catalog
     import layered
     import memory_service
@@ -204,6 +205,19 @@ def main() -> int:
         assert result["days"], result
         assert any(day == "2026-08-01" for day in result["days"]), result["days"]
 
+    # ---------- 13. 信念层 ----------
+    def t_beliefs():
+        user = "believer"
+        for day in ("2026-09-23", "2026-09-25", "2026-10-02"):
+            beliefs.tell(user, "他养了只猫叫煤球", day)
+        top = beliefs.beliefs_of(user)
+        assert top and top[0]["confidence"] > 0.7, top
+        beliefs.tell(user, "他其实没有猫", "2026-10-20")
+        ranked = beliefs.beliefs_of(user)
+        assert ranked[0]["statement"] == "他养了只猫叫煤球", ranked
+        assert ranked[0]["status"] == "challenged", ranked[0]
+        assert ranked[0]["confidence"] > ranked[1]["confidence"], ranked
+
     print("跑测试：")
     check("1 落盘 / 封存 / 定位表", t_ingest)
     check("2 同一消息去重", t_dedupe)
@@ -217,6 +231,7 @@ def main() -> int:
     check("10 HTTP 服务 + 客户端容错", t_http)
     check("11 自检", t_selfcheck)
     check("12 联想检索（旧事能翻出来）", t_assoc)
+    check("13 信念层（确认变强、否认不轻易推翻）", t_beliefs)
 
     print(f"\n通过 {len(PASS)} / 失败 {len(FAIL)}")
     for name, error in FAIL:
@@ -227,5 +242,6 @@ def main() -> int:
 
 if __name__ == "__main__":
     sys.exit(main())
+
 
 

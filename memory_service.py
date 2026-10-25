@@ -1,4 +1,4 @@
-﻿# -*- coding: utf-8 -*-
+# -*- coding: utf-8 -*-
 """跨上下文记忆服务（MVP，标准库实现，不依赖任何平台）。
 
 给任何聊天 bot 用：发消息前调 /recall 拿一段“该注入的记忆”，收到消息后调 /remember 存，
@@ -140,6 +140,17 @@ def remember(payload: dict) -> dict:
                     added.append(fact)
                 except sqlite3.Error:
                     pass
+
+            # 抽到的事实同时喂给信念层：反复确认会变成“我确信的事”
+            if added:
+                try:
+                    import beliefs as beliefs_mod
+
+                    stamp = time.strftime("%Y-%m-%d", time.localtime(now))
+                    for fact in added:
+                        beliefs_mod.tell(user_id, fact, stamp)
+                except Exception:  # noqa: BLE001 - 信念层坏了不影响存记忆
+                    pass
     return {"ok": True, "facts_added": added}
 
 
@@ -182,6 +193,15 @@ def recall(payload: dict) -> dict:
         msgs = recent_messages(conn, platform, chat_id, user_id)
 
     lines = []
+    # 信念层：比“事实”更强的一层，只有反复被确认的才进来
+    try:
+        import beliefs as beliefs_mod
+
+        top = beliefs_mod.beliefs_of(user_id)[:3]
+        if top:
+            lines.append("【我确信的】" + "；".join(item["statement"] for item in top))
+    except Exception:  # noqa: BLE001 - 没有信念层也要能跑
+        pass
     if facts:
         lines.append("【我记得的他/她】" + "；".join(facts))
     if summaries:
