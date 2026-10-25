@@ -1,4 +1,4 @@
-﻿# -*- coding: utf-8 -*-
+# -*- coding: utf-8 -*-
 """三层日程记忆（按 douco 2026-10-26 定的规则实现）。
 
 规则：
@@ -348,13 +348,13 @@ def ask(now: str, query: str) -> dict:
         day = when.get("day")
         if day:
             raw = find_raw(day)
-            if raw is None:
-                return {"ok": True, "level": "none", "answer": f"没有 {day} 的记录。"}
-            lines = [ln for ln in raw.read_text(encoding="utf-8").splitlines() if ln.startswith("- [")]
-            hits = [ln for ln in lines if score_text(ln, weights) >= 4] if weights else []
-            body = "\n".join(hits[:6]) if hits else "\n".join(lines[:8])
-            return {"ok": True, "level": "day", "day": day,
-                    "answer": f"（{day}{'，' + when['label'] if when.get('label') else ''}）\n" + body[:900]}
+            if raw is not None:
+                lines = [ln for ln in raw.read_text(encoding="utf-8").splitlines() if ln.startswith("- [")]
+                hits = [ln for ln in lines if score_text(ln, weights) >= 4] if weights else []
+                body = "\n".join(hits[:6]) if hits else "\n".join(lines[:8])
+                return {"ok": True, "level": "day", "day": day,
+                        "answer": f"（{day}{'，' + when['label'] if when.get('label') else ''}）\n" + body[:900]}
+            # 那天没有记录就继续往下走：可能问的其实是别的事，交给目录和联想
 
     if not candidates:
         return {"ok": True, "level": "none", "answer": "没有更早的记录可查。"}
@@ -368,6 +368,17 @@ def ask(now: str, query: str) -> dict:
             best, best_score = day, score
 
     if not best or best_score < 4:
+        # 目录没命中，交给联想检索：一个词牵出一串旧日子（哪怕已归档到最底层）
+        try:
+            import assoc
+
+            linked = assoc.ask(query, depth=2)
+            if linked.get("days"):
+                return {"ok": True, "level": "assoc", "answer": linked["answer"],
+                        "entities": linked.get("entities", []), "related": linked.get("related", []),
+                        "days": linked.get("days", [])}
+        except Exception:  # noqa: BLE001 - 联想是加分项，坏了不影响主流程
+            pass
         return {"ok": True, "level": "none", "answer": "目录里没有相关记录。"}
 
     idx = load_index(best) or {}
@@ -482,6 +493,7 @@ if __name__ == "__main__":
         print(json.dumps(ask(args.now, args.q), ensure_ascii=False, indent=1))
     else:
         print(json.dumps({"index_days": all_index_days()}, ensure_ascii=False))
+
 
 
 

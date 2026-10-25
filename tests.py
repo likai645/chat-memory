@@ -56,6 +56,7 @@ def main() -> int:
     print(f"沙箱：{box}\n")
 
     import archive
+    import assoc
     import catalog
     import layered
     import memory_service
@@ -193,6 +194,16 @@ def main() -> int:
         report = selfcheck.selfcheck(box)
         assert report["ok"], report
 
+    # ---------- 12. 联想检索 ----------
+    def t_assoc():
+        layered.ingest("2026-08-01", "用户", "我养了只猫叫煤球，爱睡键盘", ts="09:00:00")
+        layered.seal("2026-08-01")
+        built = assoc.build()
+        assert built["entities"] > 0, built
+        result = assoc.ask("猫", depth=2)
+        assert result["days"], result
+        assert any(day == "2026-08-01" for day in result["days"]), result["days"]
+
     print("跑测试：")
     check("1 落盘 / 封存 / 定位表", t_ingest)
     check("2 同一消息去重", t_dedupe)
@@ -205,6 +216,7 @@ def main() -> int:
     check("9 喜欢的东西 + 否认", t_profile)
     check("10 HTTP 服务 + 客户端容错", t_http)
     check("11 自检", t_selfcheck)
+    check("12 联想检索（旧事能翻出来）", t_assoc)
 
     print(f"\n通过 {len(PASS)} / 失败 {len(FAIL)}")
     for name, error in FAIL:
@@ -215,4 +227,5 @@ def main() -> int:
 
 if __name__ == "__main__":
     sys.exit(main())
+
 
